@@ -45,3 +45,5 @@
 .background-conversation .native-composer:focus-within { border-color:#84a493; }
 
 .advance-control{display:flex;align-items:center;gap:10px}.advance-countdown{color:#9298a4;font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}.advance-control>.button{flex-shrink:0}.topbar-actions>.button,.advance-control>.button{height:32px}@media(max-width:760px){.topbar{height:auto;min-height:56px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}.topbar-actions{flex:1 0 100%;justify-content:flex-end;flex-wrap:nowrap}.advance-countdown{font-size:10px}.advance-control{gap:6px}}
+
+.advance-running{padding-left:3px;gap:3px}.advance-stop{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border-radius:4px;background:#fbe8e8;color:#bd454b;flex-shrink:0;transition:background .12s,color .12s}.advance-stop:hover:not(:disabled){background:#f6d6d8;color:#a92d35}.advance-stop>svg{width:10px;height:10px}
