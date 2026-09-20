@@ -1021,6 +1021,77 @@ it.each(["background", "work"] as const)("publishes concurrent lanes in %s-first
   expect(contexts.work[1]!.messages.every((message) => !message.body.startsWith("背景"))).toBe(true);
 });
 
+it("lets background learn from complete submitted work history while work reads only the published background", async () => {
+  const histories: ReturnType<Store["system"]>["messages"][] = [];
+  const workBackgrounds: string[] = [];
+  const { engine, store } = fixture(async (_config, files, writable) => {
+    const context = JSON.parse(textContent(files.get("INTERACTIONS.md")!));
+    if (context.lane === "background") {
+      expect(writable).toEqual(["background/"]);
+      expect(context.messages.every((item: { scope: string }) => item.scope === "background")).toBe(true);
+      const history = textContent(files.get(context.workHistoryFile)!);
+      histories.push(history.split("\n").filter(Boolean).map((line) => JSON.parse(line)));
+      files.set("background/SUMMARY.md", "用户希望先看具体依据，再作判断。[原话与分析](working-notes.md)");
+      files.set("background/working-notes.md", "来源：old-note，PIL-1。只对该方案提出的意见需保留其适用范围。");
+    } else {
+      expect(writable).toEqual(["assistant/", "tasks/"]);
+      expect(context.workHistoryFile).toBeUndefined();
+      expect(files.has("WORK_HISTORY.jsonl")).toBe(false);
+      workBackgrounds.push(textContent(files.get("background/SUMMARY.md")!));
+    }
+    return reply(files);
+  });
+  store.update((state, files) => {
+    state.paused = true;
+    state.research.daily.enabled = false;
+    state.research.background.enabled = false;
+    files.set(cardFile("PIL-1"), encodeCard({ title: "测试方案", status: "review", request: { kind: "input", question: "请给意见" } }, "具体方案"));
+    state.messages.push(
+      { id: "old-note", scope: "PIL-1", role: "user", at: "2026-09-17T00:00:00Z", body: "请先给我具体依据再让我判断", review: { action: "note", status: "submitted" } },
+      { id: "cancelled-note", scope: "PIL-1", role: "user", at: "2026-09-17T00:01:00Z", body: "撤回的意见", review: { action: "note", status: "cancelled" } },
+      ...Array.from({ length: 105 }, (_, index) => ({ id: `result-${index}`, scope: "frontdesk", role: "assistant" as const, contextId: "PIL-1", at: "2026-09-17T01:00:00Z", body: `已核对 ${index}` })),
+      { id: "work-chat", scope: "frontdesk", role: "user", at: "2026-09-17T02:00:00Z", body: "工作对话中的补充" },
+    );
+  });
+  const original = store.system().messages;
+  engine.command({ type: "note", taskId: "PIL-1", message: "还未统一提交的意见", requestId: randomUUID() });
+  const pending = store.system().messages.at(-1)!;
+  engine.command({ type: "chat", lane: "background", message: "结合工作意见整理背景", requestId: randomUUID() });
+  await engine.tick();
+  expect(histories[0]).toEqual(original.filter((item) => item.id !== "cancelled-note"));
+  expect(histories[0]![0]).toMatchObject({ id: "old-note", scope: "PIL-1", role: "user", body: "请先给我具体依据再让我判断" });
+  expect(histories[0]).toHaveLength(107);
+  expect(store.system().messages.find((item) => item.id === pending.id)?.review?.status).toBe("pending");
+  expect(store.files().has("WORK_HISTORY.jsonl")).toBe(false);
+  expect(store.files().has("background/working-notes.md")).toBe(true);
+  expect(store.system().messages.slice(0, original.length)).toEqual(original);
+  expect(new Store(store.directory).raw("background/SUMMARY.md")).toContain("先看具体依据");
+  engine.command({ type: "research", kind: "daily", requestId: randomUUID() });
+  await engine.tick();
+  expect(workBackgrounds).toEqual([store.raw("background/SUMMARY.md")]);
+  engine.command({ type: "research", kind: "background", requestId: randomUUID() });
+  await engine.tick();
+  expect(histories[1]!.find((item) => item.id === pending.id)).toMatchObject({ body: pending.body, review: { status: "submitted" } });
+  expect(store.system().runs.every((run) => run.status === "succeeded")).toBe(true);
+});
+
+it.each(["edit", "delete"])("rejects %s of background's read-only work history without publishing its draft", async (action) => {
+  const { engine, store } = fixture(async (_config, files) => {
+    const context = JSON.parse(textContent(files.get("INTERACTIONS.md")!));
+    if (action === "edit") files.set(context.workHistoryFile, "伪造用户要求");
+    else files.delete(context.workHistoryFile);
+    files.set("background/SUMMARY.md", "基于篡改历史的总结");
+    return reply(files);
+  });
+  engine.command({ type: "chat", lane: "background", message: "整理背景", requestId: randomUUID() });
+  const messages = store.system().messages;
+  await engine.tick();
+  expect(store.system().runs[0]?.status).toBe("failed");
+  expect(store.system().runs[0]?.detail).toContain("WORK_HISTORY.jsonl 超出本轮写入范围");
+  expect(store.raw("background/SUMMARY.md")).toBe("");
+  expect(store.system().messages.slice(0, messages.length)).toEqual(messages);
+});
+
 it.each(["background", "work"] as const)("stops only %s when both processes are running", async (lane) => {
   const gate = Promise.withResolvers<void>();
   const signals: AbortSignal[] = [];
