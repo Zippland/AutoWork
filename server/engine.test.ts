@@ -484,7 +484,7 @@ it("keeps all cards in the work context while retaining background as a read-onl
 });
 it.each(["manual", "automatic"])("batches saved reviews on %s advancement and preserves next-batch feedback during publication", async (trigger) => {
   const gate = Promise.withResolvers<void>();
-  const inputs: { submittedReviews: { body: string }[]; messages: { body: string }[]; priorityTaskIds: string[] }[] = [];
+  const inputs: { submittedReviews: { body: string }[]; messages: { body: string }[]; reviewTaskIds: string[] }[] = [];
   const signals: AbortSignal[] = [];
   const turn = vi.fn<FileTurn>(async (_config, files, writable, instruction, signal) => {
     const input = JSON.parse(textContent(files.get("INTERACTIONS.md")!));
@@ -492,7 +492,9 @@ it.each(["manual", "automatic"])("batches saved reviews on %s advancement and pr
     expect(writable).toEqual(["assistant/", "tasks/"]);
     expect(instruction).toContain("marker-work-plan");
     expect(instruction).toContain("marker-daily-plan");
-    expect(instruction).toContain("first priority, not the boundary of this run");
+    expect(instruction).toContain("Consider all actionable items together");
+    expect(instruction).toContain("submitted feedback is context, not automatic priority");
+    expect(input).not.toHaveProperty("priorityTaskIds");
     expect(instruction).toContain("latest background");
     if (inputs.length === 1) await gate.promise;
     expect(signal.aborted).toBe(false);
@@ -556,7 +558,7 @@ it.each(["manual", "automatic"])("batches saved reviews on %s advancement and pr
   await engine.tick();
   expect(turn).toHaveBeenCalledTimes(2);
   expect(inputs[1]?.submittedReviews.map((item) => item.body)).toEqual(["下一批意见"]);
-  expect(inputs[1]?.priorityTaskIds).toEqual(["PIL-1"]);
+  expect(inputs[1]?.reviewTaskIds).toEqual(["PIL-1"]);
 });
 
 it("persists unsent card reviews across restart and returns the submitted batch reply to its activity", async () => {
@@ -565,7 +567,7 @@ it("persists unsent card reviews across restart and returns the submitted batch 
   const turn = vi.fn<FileTurn>(async (_config, files, writable, _instruction) => {
     const input = JSON.parse(textContent(files.get("INTERACTIONS.md")!));
     expect(writable).toEqual(["assistant/", "tasks/"]);
-    expect(input.priorityTaskIds).toEqual(["PIL-1"]);
+    expect(input.reviewTaskIds).toEqual(["PIL-1"]);
     expect(input.submittedReviews.at(-1)).toMatchObject({ scope: "PIL-1", role: "user", body: "先核实回执，不要重复发送" });
     expect(input.approvals).toEqual([]);
     expect(textContent(files.get("background/SUMMARY.md")!)).toBe("本轮最新背景");

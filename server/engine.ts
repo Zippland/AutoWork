@@ -291,7 +291,7 @@ export class Engine {
         const body =
           command.kind === "background"
             ? "请全面调研并刷新我的背景资料。"
-            : `请推进整个工作台：先读最新背景与全部事项，${reviews.length ? `优先处理本批 ${reviews.length} 条审阅意见（${[...new Set(reviews.map((item) => item.scope))].join("、")}），` : ""}查看今天的整体情况，并按当前计划推进已交办或已授权的事项；需要我决定的内容准备好后交给我审核。`;
+            : `请推进整个工作台：先读最新背景与全部事项，${reviews.length ? `结合本批 ${reviews.length} 条审阅意见（${[...new Set(reviews.map((item) => item.scope))].join("、")}），` : ""}统一判断所有可推进事项，查看今天的整体情况，并按当前计划推进已交办或已授权的事项；需要我决定的内容准备好后交给我审核。`;
         message(state, scope, body);
         state.queue.push({
           kind: "user",
@@ -457,7 +457,7 @@ export class Engine {
       if (queued) scope = lane === "background" ? "background" : queued.scope;
       else if (scheduledResearch) scope = lane === "background" ? "background" : "frontdesk";
       if (!scope) return;
-      // Every work wake-up reviews the board; a card is the focus, not a separate scope.
+      // Every work wake-up reviews the board; attached cards provide context, not priority or scope.
       const research = lane === "work" ? "daily" : scheduledResearch;
       if (
         automatic &&
@@ -514,7 +514,7 @@ export class Engine {
             sessionId: relevant.sessions[lane],
             otherSessionId: relevant.sessions[lane === "work" ? "background" : "work"],
             currentTaskId: taskId,
-            priorityTaskIds: taskIds,
+            reviewTaskIds: taskIds,
             submittedReviews: relevant.messages.filter((item) => reviewIds.includes(item.id)),
             backgroundReadAt: now(),
             onboardingCompletedAt: relevant.onboardingCompletedAt,
@@ -540,7 +540,8 @@ export class Engine {
         lane === "work" ? "Before planning or acting, read background/SUMMARY.md from this turn’s fresh workspace copy. It was loaded from the latest published background at the start of this run; do not rely on remembered background. Follow its references as needed. Background may update independently; next work turn reads it again." : "Refresh background/SUMMARY.md and freely organize background/ evidence. Work proceeds independently; do not update cards or assistant/ in this lane. Read their published files as context when useful.",
         "Read INTERACTIONS.md for this lane’s conversation, scope and actual authorization records.",
         "TaskPilot has exactly two persistent logical sessions: work and background, identified by sessionId. Each has its own saved conversation and run history. CLI processes execute bounded turns; files and host history preserve continuity across restarts or harness changes. You know the other session exists and can read its published results from the shared board/files, but do not impersonate it or write its directories. Respond to the current request without re-executing earlier requests.",
-        taskIds.length ? `Priority items: ${taskIds.map((id) => `tasks/${id}/`).join(", ")}. These items are the first priority, not the boundary of this run. Review the whole board and latest background, handle all submitted feedback, and advance other relevant actionable work under existing authorization. Reuse recent verified evidence and investigate further only where needed. Record each item's outcome in its files and summarize outcomes by item in the final reply.` : "Selected scope: the shared workspace.",
+        lane === "work" ? "Review the whole board and latest background. Consider all actionable items together; submitted feedback is context, not automatic priority or a limit on the scope of this run. Advance work under existing authorization, respecting explicit user priorities, dependencies, and paused or archived states. Reuse recent verified evidence and investigate further only where needed. Record each item's outcome in its files and summarize outcomes by item in the final reply." : "Selected scope: background research.",
+        taskIds.length ? `Items associated with this batch: ${taskIds.map((id) => `tasks/${id}/`).join(", ")}. INTERACTIONS.md reviewTaskIds links the submitted context and reply to their card activities; it does not rank items.` : "",
         "Only submitted reviews in INTERACTIONS.md belong to this run. Saved pending reviews visible on the live board are for a future batch; do not read or act on them through other tools. Never interpret clicking workbench advance as approval of an external action. Preserve existing approval boundaries, and reconcile any changed proposal with its exact recorded approval before acting.",
         queued ? `${queued.kind === "user" ? "Current user message" : "Host notification, not a new user instruction"}: ${JSON.stringify(queued.message)}` : "This is an automatic continuation, not new user authorization.",
         research ? `Research: ${research}. Trigger: ${automatic ? "automatic; if there is no actionable or meaningful change, final reply must be exactly NO_UPDATE" : "manual; always summarize findings and actual coverage"}. Previous completed research: ${system.research[research].lastCompletedAt || "none"}. Local time: ${new Date().toString()}.` : "",

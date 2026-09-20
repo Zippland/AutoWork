@@ -3,7 +3,6 @@ import { Check, LoaderCircle, Pause, Play } from "lucide-react";
 import { STATUS_LABELS, CATEGORY_LABELS, executionLane, type PilotTask } from "../core";
 import type { InteractionProps } from "./frontdesk";
 import Markdown from "./markdown";
-import { RunProgress } from "./run-progress";
 import { Button } from "./ui";
 
 const dateLabel = (at: string) => new Date(at).toLocaleString("zh-CN", {
@@ -28,7 +27,6 @@ export function TaskDetail({ task, state, send, pending }: { task: PilotTask } &
   const [historyCount, setHistoryCount] = useState(20);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
   const submittingRef = useRef(false);
   useEffect(() => {
     try {
@@ -51,7 +49,6 @@ export function TaskDetail({ task, state, send, pending }: { task: PilotTask } &
     try {
       await send({ type: "note", taskId: task.id, ...draft });
       setDraft(emptyDraft());
-      setSubmitted(true);
     } catch (reason) {
       setError(`未能确认提交，批注已保留，可重试。${reason instanceof Error ? `（${reason.message}）` : ""}`);
     } finally {
@@ -101,16 +98,13 @@ export function TaskDetail({ task, state, send, pending }: { task: PilotTask } &
       {task.status === "done" && <section className="decision-box"><h3>请验收这次交付</h3><p>确认成果符合预期后归档。</p><Button disabled={pending} onClick={() => void act("archive")}><Check size={14} />验收通过并归档</Button></section>}
       <form className="issue-comment-form" onSubmit={(event) => { event.preventDefault(); void submitNote(); }}>
         <label htmlFor="issue-comment">{reviews.length ? "继续补充意见" : "修改意见"}</label>
-        <textarea id="issue-comment" value={draft.message} rows={5} maxLength={16000} readOnly={submitting} placeholder="补充背景、指出哪里要改，或告诉 AI 下一步怎么做…" aria-describedby="issue-comment-hint" onChange={(event) => { setDraft({ message: event.target.value, requestId: crypto.randomUUID() }); setSubmitted(false); }} onKeyDown={(event) => {
+        <textarea id="issue-comment" value={draft.message} rows={5} maxLength={16000} readOnly={submitting} placeholder="补充背景、指出哪里要改，或告诉 AI 下一步怎么做…" aria-describedby="issue-comment-hint" onChange={(event) => { setDraft({ message: event.target.value, requestId: crypto.randomUUID() }); }} onKeyDown={(event) => {
           if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
         }}/>
         <p id="issue-comment-hint">保存后进入待推进；点顶部“推进”或等定时推进后，AI 才开始处理。修改意见不代替方案审批。</p>
         <Button type="submit" disabled={pending || submitting || !draft.message.trim()}>{submitting ? <LoaderCircle size={14} className="refresh-spinning"/> : <Check size={14}/>} {submitting ? "正在保存…" : "保存修改意见"}</Button>
         <span className="issue-comment-shortcut">⌘ / Ctrl + Enter 保存</span>
       </form>
-      {(activeRun || task.queued || (submitted && !reviews.length)) && <div className="issue-feedback" role="status">
-        {activeRun ? <><strong><LoaderCircle size={13} className="refresh-spinning"/>AI 正在推进工作台</strong>{(activeRun.scope === task.id || activeRun.taskIds?.includes(task.id)) && <p>本轮优先处理这件事，同时查看整个工作台。</p>}<RunProgress run={activeRun}/></> : task.queued ? <><strong><Check size={13}/>已交给 AI，等待本轮开始</strong><p>处理进展和结果会在这里更新。</p></> : <p>可在活动中查看批注与处理记录。</p>}
-      </div>}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="issue-secondary-actions">
         {["paused", "blocked", "waiting", "done", "archived"].includes(task.status) ? <Button variant="ghost" disabled={pending || task.queued || reviews.some((item) => item.review?.action === "resume")} title="记录本次推进意愿，点顶部推进后一起处理" onClick={() => void act("resume")}><Play size={13} />{task.status === "paused" || task.status === "archived" ? "恢复并加入推进" : "加入下一轮推进"}</Button> : <Button variant="ghost" disabled={pending} onClick={() => void act("pause")}><Pause size={13} />暂缓事项</Button>}
