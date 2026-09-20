@@ -56,7 +56,7 @@ export function TaskDetail({ task, state, send, pending }: { task: PilotTask } &
       setSubmitting(false);
     }
   };
-  const messages = state.messages.filter((message) => message.scope === task.id || message.contextId === task.id || message.contextIds?.includes(task.id));
+  const messages = state.messages.filter((message) => message.review?.status !== "cancelled" && (message.scope === task.id || message.contextId === task.id || message.contextIds?.includes(task.id)));
   const reviews = messages.filter((message) => message.review?.status === "pending");
   const latestNote = reviews.findLast((message) => message.review?.action === "note");
   const approved = reviews.some((message) => message.review?.action === "approve" && message.review.digest === task.digest);
@@ -83,7 +83,7 @@ export function TaskDetail({ task, state, send, pending }: { task: PilotTask } &
         {!messages.length && <p className="issue-activity-empty">补充意见后，AI 的处理回报会留在这里。</p>}
         {messages.slice(-historyCount).reverse().map((message) => <article key={message.id}>
           <span className="activity-avatar">{message.role === "user" ? "我" : "助"}</span>
-          <div><small>{message.role === "user" ? "你" : "AI"}{message.review && <span>{message.review.status === "pending" ? "待统一推进" : message.review.status === "cancelled" ? "已撤回" : "已交给 AI"}</span>}<time dateTime={message.at}>{dateLabel(message.at)}</time></small>
+          <div><small>{message.role === "user" ? "你" : "AI"}{message.review && <span>{message.review.status === "pending" ? "待统一推进" : "已交给 AI"}</span>}<time dateTime={message.at}>{dateLabel(message.at)}</time></small>
             <Markdown basePath={`tasks/${task.id}/`} body={message.body} />
           </div>
         </article>)}
