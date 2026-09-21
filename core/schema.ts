@@ -62,16 +62,22 @@ export const researchSettingsSchema = z.object({
   backgroundMinutes: z.number().int().min(30).max(10080).default(720),
 }).refine((value) => value.start < value.end, { message: "结束时间须晚于开始时间。" });
 export type ResearchSettings = z.infer<typeof researchSettingsSchema>;
-const scheduleEntrySchema = z.object({
-  blockedReason: z.string().nullable().default(null),
+const scheduleEntrySchema = z.preprocess((value) => {
+  // Older versions permanently paused a schedule after any failed run.
+  // Preserve the diagnostic, but only user settings control future runs.
+  if (value && typeof value === "object" && !("lastError" in value) && "blockedReason" in value)
+    return { ...value, lastError: value.blockedReason };
+  return value;
+}, z.object({
+  lastError: z.string().nullable().default(null),
   enabled: z.boolean().default(true),
   nextAt: z.string().datetime().nullable().default(null),
   lastCompletedAt: z.string().datetime().nullable().default(null),
-});
+}));
 const emptySchedule = () => scheduleEntrySchema.parse({});
 export const researchSchedulesSchema = z.object({
   settings: researchSettingsSchema.default(() => researchSettingsSchema.parse({})),
-  // Legacy shared pause is migrated to the failed research kind on startup.
+  // Legacy shared error is migrated to the failed research kind on startup.
   blockedReason: z.string().nullable().default(null),
   daily: scheduleEntrySchema.default(emptySchedule),
   background: scheduleEntrySchema.default(emptySchedule),

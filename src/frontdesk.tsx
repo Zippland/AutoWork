@@ -54,7 +54,7 @@ function LaneConversation({ state, send, pending, composeRequest = 0, onOpenTask
   const run = state.runs.findLast((item) => executionLane(item) === lane && item.status === "running");
   const kind = background ? "background" : "daily";
   const queued = state.research.queued.includes(kind);
-  const failed = state.research[kind].blockedReason;
+  const failed = state.research[kind].lastError;
   const connected = state.runtime.modelConnection.status === "connected";
   const act = async (command: Command) => {
     setError("");

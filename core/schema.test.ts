@@ -86,3 +86,14 @@ it("validates both task types without guessing a responsibility for unclassified
   expect(cardHeaderSchema.safeParse({ title: "事项", status: "todo", category: "unrelated" }).success).toBe(false);
   expect(taskViewSchema.shape.category.parse(undefined)).toBeNull();
 });
+
+it("retains legacy schedule errors as diagnostics without changing the user's switches", () => {
+  const state = systemSchema.parse({ format: 3, paused: false, research: {
+    daily: { enabled: true, blockedReason: "旧版超时暂停" },
+    background: { enabled: false, blockedReason: "旧版错误", lastError: null },
+  } });
+  expect(state.paused).toBe(false);
+  expect(state.research.daily).toMatchObject({ enabled: true, lastError: "旧版超时暂停" });
+  expect(state.research.daily).not.toHaveProperty("blockedReason");
+  expect(state.research.background).toMatchObject({ enabled: false, lastError: null });
+});

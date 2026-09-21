@@ -60,7 +60,7 @@ export default function BackgroundView({
             ? state.runtime.modelConnection.status === "connected"
               ? "请求已保存，即将开始；进展会显示在本页的背景对话。"
               : "已保存请求，连接 AI 后开始。"
-            : `${schedule.lastCompletedAt ? `上次总结 ${time(schedule.lastCompletedAt)}` : "尚未立即总结"} · ${state.paused || schedule.blockedReason ? "自动复查已暂停" : !schedule.enabled ? "自动复查已关闭" : schedule.nextAt ? `下次复查 ${time(schedule.nextAt)}（北京时间）` : "等待工作日历更新"}`}
+            : `${schedule.lastCompletedAt ? `上次总结 ${time(schedule.lastCompletedAt)}` : "尚未立即总结"} · ${state.paused ? "自动复查已暂停" : !schedule.enabled ? "自动复查已关闭" : schedule.nextAt ? `下次复查 ${time(schedule.nextAt)}（北京时间）` : "等待工作日历更新"}`}
       </p>
       {state.research.calendarError && <p className="error" role="status">{state.research.calendarError}</p>}
       {error && (

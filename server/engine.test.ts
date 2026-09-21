@@ -119,7 +119,7 @@ it("keeps incomplete onboarding recoverable after failure, empty results, and in
   expect(new Store(store.directory).system().onboardingCompletedAt).toBeNull();
   expect(store.raw("background/SUMMARY.md")).toBe("已有初步背景");
 });
-it("pauses only failed background research while daily work keeps running", async () => {
+it("keeps independent schedules and recovery records after failed background research", async () => {
   let fail = true;
   const turn = vi.fn<FileTurn>(async (_config, files) => {
     if (fail && JSON.parse(textContent(files.get("INTERACTIONS.md")!)).lane === "background") throw new FileTurnError("网络连接中断", "/controlled/recovery/run");
@@ -129,7 +129,7 @@ it("pauses only failed background research while daily work keeps running", asyn
   engine.recover();
   engine.command({ type: "research", kind: "background", requestId: randomUUID() });
   await engine.tick();
-  expect(engine.snapshot().research.background.blockedReason).toContain("网络连接中断");
+  expect(engine.snapshot().research.background.lastError).toContain("网络连接中断");
   expect(store.system().runs.at(-1)?.recoveryPath).toBe("/controlled/recovery/run");
   const notices = store.system().messages.length;
   vi.setSystemTime(new Date("2026-09-18T04:00:00Z"));
@@ -142,11 +142,13 @@ it("pauses only failed background research while daily work keeps running", asyn
   engine.command({ type: "research", kind: "background", requestId: randomUUID() });
   await engine.tick();
   expect(turn).toHaveBeenCalledTimes(3);
-  expect(engine.snapshot().research.background.blockedReason).toBeNull();
+  expect(engine.snapshot().research.background.lastError).toBeNull();
   expect(store.system().research.background.lastCompletedAt).toBe("2026-09-18T04:00:00.000Z");
 });
 it("shows live progress and stops only the current run on user cancellation", async () => {
-  const { engine, store } = fixture(async (_config, _files, _scope, _instruction, signal, runtime) => {
+  let calls = 0;
+  const { engine, store } = fixture(async (_config, files, _scope, _instruction, signal, runtime) => {
+    if (++calls > 1) return reply(files, "下一次定时推进完成");
     runtime?.onProgress("正在准备本轮资料");
     runtime?.onProgress("AI 已启动，等待进展");
     runtime?.onProgress("正在查看网页");
@@ -162,6 +164,13 @@ it("shows live progress and stops only the current run on user cancellation", as
   expect(engine.snapshot().paused).toBe(false);
   expect(store.system().runs.at(-1)?.status).toBe("interrupted");
   expect(store.system().runs.at(-1)?.detail).toContain("你已停止");
+  expect(store.system().research.daily.nextAt).toBe("2026-09-18T02:30:00.000Z");
+  await engine.tick();
+  expect(calls).toBe(1);
+  vi.setSystemTime(new Date("2026-09-18T02:30:00Z"));
+  await engine.tick();
+  expect(calls).toBe(2);
+  expect(store.system().runs.at(-1)).toMatchObject({ status: "succeeded", source: "automatic" });
 });
 it("lets the single assistant interpret a natural reference, edit any card, and create free project notes", async () => {
   const { store, engine } = fixture(
@@ -400,6 +409,55 @@ it("does not report failed research as completed or retry it on every 5-second t
   expect(turn).toHaveBeenCalledTimes(1);
   expect(store.system().research.daily.lastCompletedAt).toBeNull();
   expect(store.system().runs.at(-1)?.status).toBe("failed");
+});
+
+it.each(["daily", "background"] as const)("continues %s on its next scheduled turn after a long failed run, including across restart", async (kind) => {
+  let fail = true;
+  const turn = vi.fn<FileTurn>(async (_config, files) => {
+    if (fail) {
+      vi.setSystemTime(new Date("2026-09-18T02:45:00Z"));
+      throw new FileTurnError("本地 AI 长时间没有返回进展", "/controlled/recovery/failed-run");
+    }
+    return reply(files, "下一轮完成");
+  });
+  const { engine, store } = fixture(turn);
+  store.updateSystem((state) => {
+    state.research.settings.dailyMinutes = state.research.settings.backgroundMinutes = 30;
+    state.research[kind === "daily" ? "background" : "daily"].enabled = false;
+    state.research[kind].nextAt = new Date().toISOString();
+  });
+  await engine.tick();
+  expect(store.system().paused).toBe(false);
+  expect(store.system().research[kind]).toMatchObject({ enabled: true, lastCompletedAt: null, lastError: "本地 AI 长时间没有返回进展", nextAt: "2026-09-18T03:15:00.000Z" });
+  expect(store.system().runs[0]).toMatchObject({ status: "failed", recoveryPath: "/controlled/recovery/failed-run" });
+  const restored = new Engine(new Store(store.directory), () => ({ kind: "codex", executable: "/controlled/no-real-cli" }), undefined, turn);
+  restored.recover();
+  await restored.tick();
+  vi.setSystemTime(new Date("2026-09-18T03:14:59Z"));
+  await restored.tick();
+  expect(turn).toHaveBeenCalledTimes(1);
+  fail = false;
+  vi.setSystemTime(new Date("2026-09-18T03:15:00Z"));
+  await restored.tick();
+  expect(turn).toHaveBeenCalledTimes(2);
+  expect(store.system().runs[1]).toMatchObject({ status: "succeeded", source: "automatic", research: kind });
+  expect(store.system().research[kind]).toMatchObject({ lastError: null, lastCompletedAt: "2026-09-18T03:15:00.000Z", nextAt: "2026-09-18T03:45:00.000Z" });
+});
+
+it.each(["pause", "disable"] as const)("respects the user's %s setting after failure", async (setting) => {
+  const turn = vi.fn<FileTurn>(async () => { throw new Error("受控超时"); });
+  const { engine, store } = fixture(turn);
+  store.updateSystem((state) => { state.research.background.enabled = false; });
+  engine.command({ type: "research", kind: "daily", requestId: randomUUID() });
+  await engine.tick();
+  if (setting === "pause") engine.command({ type: "pause", paused: true });
+  else engine.command({ type: "research_schedule", kind: "daily", enabled: false, requestId: randomUUID() });
+  vi.setSystemTime(new Date("2026-09-18T03:00:00Z"));
+  engine.recover();
+  await engine.tick();
+  expect(turn).toHaveBeenCalledTimes(1);
+  expect(store.system().paused).toBe(setting === "pause");
+  expect(store.system().research.daily.enabled).toBe(setting !== "disable");
 });
 
 it("reserves the automatic budget without blocking an explicit manual refresh", async () => {
@@ -1112,7 +1170,7 @@ it.each(["background", "work"] as const)("stops only %s when both processes are 
   gate.resolve();
   await running;
   expect(store.system().runs.filter((run) => run.status === "succeeded")).toHaveLength(1);
-  expect(store.system().research[lane === "background" ? "daily" : "background"].blockedReason).toBeNull();
+  expect(store.system().research[lane === "background" ? "daily" : "background"].lastError).toBeNull();
 });
 
 it("keeps background research running when work is created or approved, preserving the new work queue", async () => {
@@ -1168,7 +1226,7 @@ it("does not immediately restart a card after stopping the work process", async 
   expect(store.system().errors["PIL-1"]).toContain("停止本轮");
 });
 
-it("migrates a legacy shared research failure only to its own schedule", () => {
+it("migrates a legacy shared research failure into its own diagnostic", () => {
   const { engine, store } = fixture();
   store.updateSystem((state) => {
     state.research.blockedReason = "旧版背景调研失败";
@@ -1176,8 +1234,32 @@ it("migrates a legacy shared research failure only to its own schedule", () => {
   });
   engine.recover();
   expect(store.system().research.blockedReason).toBeNull();
-  expect(store.system().research.background.blockedReason).toBe("旧版背景调研失败");
-  expect(store.system().research.daily.blockedReason).toBeNull();
+  expect(store.system().research.background.lastError).toBe("旧版背景调研失败");
+  expect(store.system().research.daily.lastError).toBeNull();
+});
+
+it("migrates legacy hidden pauses and preserves the interval and next working window", async () => {
+  vi.setSystemTime(new Date("2026-09-18T13:55:00Z"));
+  const turn = vi.fn<FileTurn>(async (_config, files) => reply(files));
+  const { store, engine } = fixture(turn);
+  const legacy = JSON.parse(store.raw("SYSTEM.json"));
+  legacy.research.settings.days = "weekdays";
+  legacy.research.background.enabled = false;
+  legacy.research.daily = { blockedReason: "旧版超时暂停", enabled: true, nextAt: "2026-09-18T13:50:00.000Z", lastCompletedAt: null };
+  legacy.runs.push({ id: randomUUID(), scope: "frontdesk", research: "daily", status: "failed", source: "automatic", startedAt: "2026-09-18T13:20:00.000Z", finishedAt: "2026-09-18T13:55:00.000Z", detail: "旧版超时暂停" });
+  writeFileSync(join(store.directory, "SYSTEM.json"), JSON.stringify(legacy));
+  engine.recover();
+  expect(store.system().paused).toBe(false);
+  expect(store.system().research.daily).toMatchObject({ enabled: true, lastError: "旧版超时暂停", nextAt: "2026-09-21T02:00:00.000Z" });
+  expect(JSON.parse(store.raw("SYSTEM.json")).research.daily).not.toHaveProperty("blockedReason");
+  await engine.tick();
+  vi.setSystemTime(new Date("2026-09-19T04:00:00Z"));
+  await engine.tick();
+  expect(turn).not.toHaveBeenCalled();
+  vi.setSystemTime(new Date("2026-09-21T02:00:00Z"));
+  await engine.tick();
+  expect(turn).toHaveBeenCalledTimes(1);
+  expect(store.system().runs.at(-1)).toMatchObject({ status: "succeeded", source: "automatic" });
 });
 
 

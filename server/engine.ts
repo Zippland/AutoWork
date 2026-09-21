@@ -64,16 +64,19 @@ export class Engine {
     this.store.updateSystem((state) => {
       // File/event notifications are no longer an execution trigger.
       state.queue = state.queue.filter((item) => item.kind === "user");
-      // Migrate the old shared research pause without blocking the other lane.
+      // Retain legacy diagnostics without treating a failed run as a user pause.
       if (state.research.blockedReason) {
         const failed = state.runs.findLast((run) => run.research && run.status !== "succeeded");
-        if (failed?.research) state.research[failed.research].blockedReason = state.research.blockedReason;
+        if (failed?.research) state.research[failed.research].lastError = state.research.blockedReason;
         state.research.blockedReason = null;
       }
       for (const kind of ["daily", "background"] as const) {
         const at = state.research[kind].nextAt;
+        const lastRun = state.runs.findLast((run) => run.research === kind);
+        const afterFailure = state.research[kind].lastError && lastRun?.finishedAt
+          ? this.nextResearchAt(kind, state.research.settings, Date.parse(lastRun.finishedAt)) : null;
         state.research[kind].nextAt = at
-          ? nextResearchWindow(new Date(Math.max(Date.now(), Date.parse(at))), state.research.settings)
+          ? nextResearchWindow(new Date(Math.max(Date.now(), Date.parse(at), afterFailure ? Date.parse(afterFailure) : 0)), state.research.settings)
           : this.nextResearchAt(kind);
       }
       for (const run of state.runs.filter(
@@ -81,17 +84,20 @@ export class Engine {
       )) {
         run.status = "interrupted";
         run.finishedAt = now();
-        run.detail = "服务在运行期间中断；请确认后继续。";
+        run.detail = "服务在运行期间中断，本轮未完成；后续按定时设置安排。";
         state.errors[run.scope] = run.detail;
         for (const id of run.taskIds || []) state.errors[id] = run.detail;
-        if (run.research) state.research[run.research].blockedReason = run.detail;
+        if (run.research) {
+          state.research[run.research].lastError = run.detail;
+          state.research[run.research].nextAt = this.nextResearchAt(run.research, state.research.settings);
+        }
         if (["frontdesk", "background"].includes(run.scope))
           message(state, executionLane(run) === "background" ? "background" : run.scope, run.detail, "assistant");
       }
     });
   }
-  private nextResearchAt(kind: ResearchKind, settings: ResearchSettings = this.store.system().research.settings) {
-    return nextResearchWindow(new Date(Date.now() + (kind === "daily" ? settings.dailyMinutes : settings.backgroundMinutes) * 60_000), settings);
+  private nextResearchAt(kind: ResearchKind, settings: ResearchSettings = this.store.system().research.settings, from = Date.now()) {
+    return nextResearchWindow(new Date(from + (kind === "daily" ? settings.dailyMinutes : settings.backgroundMinutes) * 60_000), settings);
   }
   private submitReviews(state: SystemState, files: FileMap) {
     const reviews = state.messages.filter((item) => item.review?.status === "pending");
@@ -272,7 +278,7 @@ export class Engine {
         if (command.type === "research_schedule") {
           state.research[command.kind].enabled = command.enabled;
           if (command.enabled) {
-            state.research[command.kind].blockedReason = null;
+            state.research[command.kind].lastError = null;
             state.research[command.kind].nextAt = this.nextResearchAt(
               command.kind,
             );
@@ -286,7 +292,7 @@ export class Engine {
         )
           return;
         const reviews = command.kind === "daily" ? this.submitReviews(state, this.store.files()) : [];
-        state.research[command.kind].blockedReason = null;
+        state.research[command.kind].lastError = null;
         const scope = command.kind === "background" ? "background" : "frontdesk";
         const body =
           command.kind === "background"
@@ -448,7 +454,7 @@ export class Engine {
         (!queued && system.onboardingCompletedAt && !system.paused && inResearchWindow(new Date(), system.research.settings)
           ? ([lane === "background" ? "background" : "daily"] as const).find(
               (kind) =>
-                !system.research[kind].blockedReason && system.research[kind].enabled &&
+                system.research[kind].enabled &&
                 system.research[kind].nextAt &&
                 Date.parse(system.research[kind].nextAt!) <= Date.now(),
             )
@@ -607,7 +613,7 @@ export class Engine {
           if (taskIds.length === 1) state.messages.at(-1)!.contextId = taskIds[0];
         }
         if (research) {
-          state.research[research].blockedReason = null;
+          state.research[research].lastError = null;
           state.research[research].lastCompletedAt = now();
           state.research[research].nextAt = this.nextResearchAt(research, state.research.settings);
         }
@@ -644,8 +650,9 @@ export class Engine {
           this.store.updateSystem((state) => {
             const run = state.runs.find((item) => item.id === runId)!;
             if (run.research) {
-              state.research[run.research].blockedReason = detail;
-              detail = `${run.research === "background" ? "背景调研" : "当天巡检"}未完成：${detail} 此类自动调研已暂停，手动重试成功后恢复。`;
+              state.research[run.research].lastError = detail;
+              state.research[run.research].nextAt = this.nextResearchAt(run.research, state.research.settings);
+              detail = `${run.research === "background" ? "背景调研" : "当天巡检"}未完成：${detail} 本轮不立即重试，后续按定时设置安排。`;
             }
             if (recoveryPath) {
               run.recoveryPath = recoveryPath;

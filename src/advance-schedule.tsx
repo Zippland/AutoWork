@@ -17,8 +17,7 @@ export function describeAdvanceSchedule({ research, paused, connected, running, 
   if (paused) return { label: "自动推进已暂停", title: "可在设置中恢复自动推进，或随时手动推进。" };
   if (!research.daily.enabled) return { label: "未开启定时推进", title: "可在设置中开启定期查看当天变化，或随时手动推进。" };
   if (!connected) return { label: "连接 AI 后自动推进", title: "请先在设置中连接本地 AI。" };
-  const blocked = research.daily.blockedReason || research.blockedReason || research.calendarError;
-  if (blocked) return { label: "自动推进已暂停", title: blocked };
+  if (research.calendarError) return { label: "自动推进暂不可用", title: research.calendarError };
   const next = Date.parse(research.daily.nextAt || "");
   if (!Number.isFinite(next)) return { label: "等待下次安排", title: "尚未取得下次自动推进时间。" };
   const seconds = Math.max(0, Math.ceil((next - now) / 1000));
