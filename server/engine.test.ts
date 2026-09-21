@@ -781,6 +781,30 @@ it("requires user acceptance of the current delivery before archiving and preser
   expect(() => archive(engine.snapshot().tasks[0]!.digest)).toThrow("尚未提交验收");
   expect(store.system().acceptances).toHaveLength(1);
 });
+it.each(["todo", "review", "waiting", "paused", "done"] as const)("closes a %s card immediately without AI or acceptance, cancelling pending feedback", (status) => {
+  const turn = vi.fn();
+  const { store, engine } = fixture(turn);
+  const task = create(engine);
+  store.update((_state, files) => {
+    files.set(cardFile(task.id), encodeCard({ title: "结束测试", status, request: status === "review" ? { kind: "input", question: "请补充信息" } : null }, "保留原文"));
+    files.set(`tasks/${task.id}/result.md`, "保留资料");
+  });
+  engine.command({ type: "note", taskId: task.id, message: "不用继续了", requestId: randomUUID() });
+  const current = engine.snapshot().tasks[0]!;
+  const command = { type: "task" as const, action: "close" as const, taskId: task.id, digest: current.digest, requestId: randomUUID() };
+  expect(() => engine.command({ ...command, digest: "outdated" })).toThrow("已有更新");
+  engine.command(command);
+  engine.command(command);
+  expect(engine.snapshot().tasks[0]?.status).toBe("archived");
+  expect(store.system().acceptances).toEqual([]);
+  expect(store.system().messages.filter((item) => item.scope === task.id && item.review?.status === "pending")).toEqual([]);
+  expect(store.system().queue.some((item) => item.scope === task.id || item.taskIds?.includes(task.id))).toBe(false);
+  expect(store.system().messages.filter((item) => item.body.includes("用户结束并归档"))).toHaveLength(1);
+  expect(parseCard(store.raw(cardFile(task.id))!).body).toContain("保留原文");
+  expect(store.raw(`tasks/${task.id}/result.md`)).toBe("保留资料");
+  expect(parseCard(new Store(store.directory).raw(cardFile(task.id))!).header.status).toBe("archived");
+  expect(turn).not.toHaveBeenCalled();
+});
 it("supports free background notes and deletion without requiring a knowledge taxonomy", async () => {
   const { store, engine } = fixture(async (_config, files) => {
     files.set("background/SUMMARY.md", "简短总结");
@@ -824,6 +848,30 @@ it("persists offline inputs idempotently and runs them once after a model become
   await engine.tick();
   await engine.tick();
   expect(turn).toHaveBeenCalledTimes(1);
+});
+it("keeps a directly closed card archived when an in-flight work result arrives, without stopping background research", async () => {
+  const gate = Promise.withResolvers<void>();
+  const signals: Partial<Record<"work" | "background", AbortSignal>> = {};
+  const { store, engine } = fixture(async (_config, files, _writable, _prompt, signal) => {
+    const lane = JSON.parse(textContent(files.get("INTERACTIONS.md")!)).lane as "work" | "background";
+    signals[lane] = signal;
+    await gate.promise;
+    if (lane === "work") files.set(cardFile("PIL-1"), encodeCard({ title: "过期结果", status: "todo", request: null }, "不应发布"));
+    else files.set("background/SUMMARY.md", "新的背景");
+    return reply(files);
+  });
+  const task = create(engine);
+  engine.command({ type: "research", kind: "background", requestId: randomUUID() });
+  const running = engine.tick();
+  engine.command({ type: "task", action: "close", taskId: task.id, digest: engine.snapshot().tasks[0]!.digest, requestId: randomUUID() });
+  expect(signals.work?.aborted).toBe(true);
+  expect(signals.background?.aborted).toBe(false);
+  gate.resolve();
+  await running;
+  expect(engine.snapshot().tasks[0]?.status).toBe("archived");
+  expect(engine.snapshot().tasks[0]?.title).toBe(task.title);
+  expect(store.raw("background/SUMMARY.md")).toBe("新的背景");
+  expect(store.system().acceptances).toEqual([]);
 });
 it("aborts stale results when the user pauses and preserves the original files", async () => {
   let release!: () => void;

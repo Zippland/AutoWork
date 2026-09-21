@@ -245,7 +245,7 @@ export const commandSchema = z.discriminatedUnion("type", [
     requestId,
     taskId: z.string(),
     digest: z.string(),
-    action: z.enum(["pause", "resume", "archive"]),
+    action: z.enum(["pause", "resume", "archive", "close"]),
   }),
   z.object({ type: z.literal("pause"), paused: z.boolean() }),
 ]);

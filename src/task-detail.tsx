@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, LoaderCircle, Pause, Play } from "lucide-react";
+import { Archive, Check, LoaderCircle, Pause, Play } from "lucide-react";
 import { STATUS_LABELS, CATEGORY_LABELS, executionLane, type PilotTask } from "../core";
 import type { InteractionProps } from "./frontdesk";
 import Markdown from "./markdown";
@@ -34,7 +34,7 @@ export function TaskDetail({ task, state, send, pending }: { task: PilotTask } &
       else localStorage.removeItem(draftKey);
     } catch { /* Keep the draft in this card if browser storage is unavailable. */ }
   }, [draft, draftKey]);
-  const act = async (action: "approve" | "pause" | "resume" | "archive") => {
+  const act = async (action: "approve" | "pause" | "resume" | "archive" | "close") => {
     setError("");
     try {
       const common = { taskId: task.id, digest: task.digest, requestId: crypto.randomUUID() };
@@ -108,6 +108,7 @@ export function TaskDetail({ task, state, send, pending }: { task: PilotTask } &
       {error && <p className="error" role="alert">{error}</p>}
       <div className="issue-secondary-actions">
         {["paused", "blocked", "waiting", "done", "archived"].includes(task.status) ? <Button variant="ghost" disabled={pending || task.queued || reviews.some((item) => item.review?.action === "resume")} title="记录本次推进意愿，点顶部推进后一起处理" onClick={() => void act("resume")}><Play size={13} />{task.status === "paused" || task.status === "archived" ? "恢复并加入推进" : "加入下一轮推进"}</Button> : <Button variant="ghost" disabled={pending} onClick={() => void act("pause")}><Pause size={13} />暂缓事项</Button>}
+        {task.status !== "archived" && <Button variant="ghost" disabled={pending} title="立即归档，不再推进；保留资料与记录" onClick={() => void act("close")}><Archive size={13} />结束并归档</Button>}
       </div>
     </aside>
   </div>;

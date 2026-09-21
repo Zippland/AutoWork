@@ -395,7 +395,7 @@ export class Engine {
         header.status =
           command.action === "pause"
             ? "paused"
-            : command.action === "archive"
+            : command.action === "archive" || command.action === "close"
               ? "archived"
               : "todo";
         header.request = null;
@@ -406,7 +406,9 @@ export class Engine {
             ? "用户暂停了事项。"
             : command.action === "archive"
               ? "用户验收通过了此版本的交付，并归档事项。"
-              : "用户要求继续推进。此操作不代表批准外部动作。",
+              : command.action === "close"
+                ? "用户结束并归档了事项，不再推进；未作交付验收。"
+                : "用户要求继续推进。此操作不代表批准外部动作。",
         );
       }
       const taskReviewIds = new Set(state.messages.filter((item) => item.scope === command.taskId && item.review).map((item) => item.id));
@@ -414,7 +416,7 @@ export class Engine {
         ...item,
         taskIds: item.taskIds.filter((id) => id !== command.taskId),
         reviewIds: item.reviewIds?.filter((id) => !taskReviewIds.has(id)),
-        message: `${item.message}\n用户随后已${command.action === "archive" ? "验收归档" : "暂停"} ${command.taskId}，本轮不再推进该事项。`,
+        message: `${item.message}\n用户随后已${command.action === "archive" ? "验收归档" : command.action === "close" ? "结束归档" : "暂停"} ${command.taskId}，本轮不再推进该事项。`,
       } : item);
       for (const item of state.messages) if (item.scope === command.taskId && item.review?.status === "pending") item.review.status = "cancelled";
       delete state.errors[command.taskId];

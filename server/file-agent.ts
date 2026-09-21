@@ -274,7 +274,7 @@ export function validateTurn(
     if (parseCard(raw).header.status !== "archived") continue;
     const original = before.get(name);
     if (!original || parseCard(original).header.status !== "archived")
-      throw new Error(`${name} 需要用户验收后才能归档；请设为 done 提交验收。`);
+      throw new Error(`${name} 需要用户操作才能归档；交付完成请设为 done 提交验收。`);
   }
   return files;
 }

@@ -105,10 +105,10 @@ it("lets models submit delivery for acceptance but never create their own archiv
   expect(validateTurn(before, delivered, ["tasks/"]).get(name)).toContain("待验收成果");
   const archived = new Map(delivered);
   archived.set(name, encodeCard({ title: "交付", status: "archived", request: null }, "声称已验收"));
-  expect(() => validateTurn(delivered, archived, ["tasks/"])).toThrow("需要用户验收");
+  expect(() => validateTurn(delivered, archived, ["tasks/"])).toThrow("需要用户操作");
   const newArchive = new Map(before);
   newArchive.set(cardFile("PIL-2"), archived.get(name)!);
-  expect(() => validateTurn(before, newArchive, ["tasks/"])).toThrow("需要用户验收");
+  expect(() => validateTurn(before, newArchive, ["tasks/"])).toThrow("需要用户操作");
   expect(() => validateTurn(archived, new Map(archived), ["tasks/"])).not.toThrow();
 });
 it("recovers a partially committed journal without overwriting a conflicting file", () => {
